@@ -2,7 +2,7 @@
 SCHEMES_BASE16 = $(wildcard base16/*.less)
 SCHEMES = $(SCHEMES_BASE16:base16/%.less=schemes/%.css)
 
-build: $(SCHEMES) index.html style.css
+build: $(SCHEMES) style.css
 
 schemes/%.css: scheme.less
 	mkdir -p schemes
@@ -11,8 +11,5 @@ schemes/%.css: scheme.less
 %.css: %.less
 	lessc $^ > $@
 
-%.html: %.jade
-	jade $^
-
 clean:
-	rm -fv schemes/*.css index.html style.css
+	rm -fv schemes/*.css style.css
