@@ -58,14 +58,12 @@ window.setInterval(function() {
 
 
 function join(channel) {
-	if (document.domain == 'hack.chat') {
-		// For https://hack.chat/
-		ws = new WebSocket('wss://hack.chat/chat-ws')
-	}
-	else {
-		// for local installs
-		ws = new WebSocket('ws://' + document.domain + ':6060')
-	}
+    if (document.location.protocol == 'https:') {
+        ws = new WebSocket('wss://' + document.domain + '/chat-ws')
+    }
+    else {
+        ws = new WebSocket('ws://' + document.domain + ':6060')
+    }
 
 	var wasConnected = false
 
