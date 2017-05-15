@@ -464,7 +464,7 @@ if (localStorageGet('joined-left') === 'false') {
 if (localStorageGet('parse-latex') === 'false') {
   $('#parse-latex').checked = false;
 }
-if (Notification.permission === 'granted') {
+if (window.Notification && Notification.permission === 'granted') {
   if (localStorageGet('notify-chat') === 'true') {
     $('#notify-chat').checked = true;
   }
