@@ -1,331 +1,217 @@
-/* jshint asi: true */
-/* jshint esnext: true */
-
 const fs = require('fs');
-const ws = require('ws');
+const WebSocket = require('ws');
 const crypto = require('crypto');
 
-let config = {};
-function loadConfig(filename) {
-  try {
-    const data = fs.readFileSync(filename, 'utf8');
-    config = JSON.parse(data);
-    console.log(`Loaded config ${filename}`);
-  } catch (e) {
-    console.warn(e);
-  }
+const cfg = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+const wss = new WebSocket.Server({ host: cfg.host, port: cfg.port });
+console.log(`Started server on ${cfg.host}:${cfg.port}`);
+
+function getAddress(ws) {
+  if (cfg.x_forwarded_for) return ws.upgradeReq.headers['x-forwarded-for'];
+  return ws.upgradeReq.connection.remoteAddress;
 }
 
-const configFilename = 'config.json';
-loadConfig(configFilename);
-fs.watchFile(configFilename, { persistent: false }, () => {
-  loadConfig(configFilename);
-});
-
-
-const server = new ws.Server({ host: config.host, port: config.port });
-console.log(`Started server on ${config.host}:${config.port}`);
-
-// rate limiter
-const POLICE = {
-  records: {},
-  halflife: 30000, // ms
-  threshold: 15,
-
-  loadJail(filename) {
-    let ids;
-    try {
-      const text = fs.readFileSync(filename, 'utf8');
-      ids = text.split(/\r?\n/);
-    } catch (e) {
-      return;
-    }
-    ids.filter(id => id && id[0] !== '#').forEach((id) => { this.arrest(id); });
-    console.log(`Loaded jail '${filename}'`);
-  },
-
-  search(id) {
-    let record = this.records[id];
-    if (!record) {
-      record = {
-        time: Date.now(),
-        score: 0,
-      };
-      this.records[id] = record;
-    }
-    return record;
-  },
-
-  frisk(id, deltaScore) {
-    const record = this.search(id);
-    if (record.arrested) {
-      return true;
-    }
-
-    record.score *= 2 ** (-(Date.now() - record.time) / POLICE.halflife);
-    record.score += deltaScore;
-    record.time = Date.now();
-    if (record.score >= this.threshold) {
-      return true;
-    }
-    return false;
-  },
-
-  arrest(id) {
-    const record = this.search(id);
-    if (record) {
-      record.arrested = true;
-    }
-  },
-
-  pardon(id) {
-    const record = this.search(id);
-    if (record) {
-      record.arrested = false;
-    }
-  },
-};
-
-POLICE.loadJail('jail.txt');
-
-function getAddress(client) {
-  if (config.x_forwarded_for) {
-    // The remoteAddress is 127.0.0.1 since if all connections
-    // originate from a proxy (e.g. nginx).
-    // You must write the x-forwarded-for header to determine the
-    // client's real IP address.
-    return client.upgradeReq.headers['x-forwarded-for'];
-  }
-
-  return client.upgradeReq.connection.remoteAddress;
-}
-
-function send(data, client) {
-  // Add timestamp to command
-  data.time = Date.now(); // eslint-disable-line no-param-reassign
+function send(obj, ws) {
   try {
-    if (client.readyState === ws.OPEN) {
-      client.send(JSON.stringify(data));
-    }
-  } catch (e) {
-    // Ignore exceptions thrown by client.send()
+    ws.send(JSON.stringify(Object.assign({ time: Date.now() }, obj)));
+  } catch (err) {
+    console.log(err);
   }
 }
 
 function nicknameValid(nick) {
-  // Allow letters, numbers, and underscores
   return /^[a-zA-Z0-9_]{1,24}$/.test(nick);
 }
 
 function hash(password) {
   const sha = crypto.createHash('sha256');
-  sha.update(password + config.salt);
+  sha.update(password + cfg.salt);
   return sha.digest('base64').substr(0, 6);
 }
 
-/** Sends data to all clients
-channel: if not null, restricts broadcast to clients in the channel
-*/
-function broadcast(data, channel) {
-  server.clients
-    .filter(client => (channel ? client.channel === channel : client.channel))
-    .forEach((client) => { send(data, client); });
+function broadcast(obj, channel) {
+  wss.clients
+    .filter(ws => (channel ? ws.channel === channel : ws.channel))
+    .forEach((ws) => { send(obj, ws); });
 }
 
 function isAdmin(client) {
-  return client.nick === config.admin;
+  return client.nick === cfg.admin;
 }
 
 function isMod(client) {
   if (isAdmin(client)) return true;
-  if (config.mods) {
-    if (client.trip && config.mods.indexOf(client.trip) > -1) {
+  if (cfg.mods) {
+    if (client.trip && cfg.mods.indexOf(client.trip) > -1) {
       return true;
     }
   }
   return false;
 }
 
+const police = {
+  records: new Map(),
+  halflife: 30000, // ms
+  threshold: 15,
 
-// `this` bound to client
-const COMMANDS = {
-  ping() {
-    // Don't do anything
+  loadJail(filename) {
+    if (!fs.existsSync(filename)) {
+      return;
+    }
+    fs.readFileSync(filename, 'utf8')
+      .split('\n')
+      .forEach((id) => { this.arrest(id); });
+    console.log(`Loaded jail ${filename}`);
   },
 
-  join(args) {
-    let channel = String(args.channel);
-    let nick = String(args.nick);
+  arrest(id) {
+    const record = this.getRecord(id);
+    if (record) {
+      record.arrested = true;
+    }
+  },
 
-    if (POLICE.frisk(getAddress(this), 3)) {
+  getRecord(id) {
+    if (this.records.has(id)) return this.records.get(id);
+    const record = {
+      time: Date.now(),
+      score: 0,
+      arrested: false,
+    };
+    this.records.set(id, record);
+    return record;
+  },
+
+  frisk(id, deltaScore) {
+    const record = this.getRecord(id);
+    if (record.arrested) return true;
+    record.score = record.store*2**(-(Date.now()-record.time)/this.halflife)+deltaScore;
+    record.time = Date.now();
+    return record.score >= this.threshold;
+  },
+
+  pardon(id) {
+    const record = this.getRecord(id);
+    if (record) {
+      record.arrested = false;
+    }
+  },
+};
+police.loadJail('jail.txt');
+
+// `this` bound to client
+const Client = {
+  ping() {},
+
+  join({ channel, nick }) {
+    if (police.frisk(getAddress(this), 3)) {
       send({ cmd: 'warn', text: 'You are joining channels too fast. Wait a moment and try again.' }, this);
       return;
     }
-
-    if (this.nick) {
-      // Already joined
-      return;
-    }
-
-    // Process channel name
-    channel = channel.trim();
-    if (!channel) {
-      // Must join a non-blank channel
-      return;
-    }
-
-    // Process nickname
-    const nickArr = nick.split('#', 2);
-    nick = nickArr[0].trim();
-
-    if (!nicknameValid(nick)) {
+    if (this.nick) { return; }
+    if (!channel) { return; }
+    const [nickname, password] = nick.split('#', 2);
+    if (!nicknameValid(nickname)) {
       send({ cmd: 'warn', text: 'Nickname must consist of up to 24 letters, numbers, and underscores' }, this);
       return;
     }
-
-    const password = nickArr[1];
-    if (nick.toLowerCase() === config.admin.toLowerCase()) {
-      if (password !== config.password) {
+    if (nickname === cfg.admin) {
+      if (password !== cfg.password) {
         send({ cmd: 'warn', text: 'Cannot impersonate the admin' }, this);
         return;
       }
     } else if (password) {
       this.trip = hash(password);
     }
-
-    if (server.clients.some(client =>
-      client.channel === channel && client.nick.toLowerCase() === nick.toLowerCase())
+    if (wss.clients.some(client =>
+      client.channel === channel && client.nick.toLowerCase() === nickname.toLowerCase())
     ) {
       send({ cmd: 'warn', text: 'Nickname taken' }, this);
       return;
     }
-
-    // Announce the new user
-    broadcast({ cmd: 'onlineAdd', nick }, channel);
-
-    // Formally join channel
     this.channel = channel;
-    this.nick = nick;
-
-    // Set the online users for new user
-    const nicks = [];
-    server.clients.filter(client => client.channel === channel)
-      .forEach((client) => { nicks.push(client.nick); });
-    send({ cmd: 'onlineSet', nicks }, this);
+    this.nick = nickname;
+    broadcast({ cmd: 'onlineAdd', nick: nickname }, channel);
+    send({
+      cmd: 'onlineSet',
+      nicks: wss.clients.filter(client => client.channel === channel).map(client => client.nick),
+    }, this);
   },
 
-  chat(args) {
-    let text = String(args.text);
-
-    if (!this.channel) {
-      return;
-    }
-    // strip newlines from beginning and end
-    text = text.replace(/^\s*\n|^\s+$|\n\s*$/g, '');
-    // replace 3+ newlines with just 2 newlines
-    text = text.replace(/\n{3,}/g, '\n\n');
-    if (!text) {
-      return;
-    }
-
-    const score = text.length / 83 / 4;
-    if (POLICE.frisk(getAddress(this), score)) {
+  chat({ text }) {
+    if (!this.channel) { return; }
+    const cleantext = text.replace(/^\s*\n|^\s+$|\n\s*$/g, '').replace(/\n{3,}/g, '\n\n');
+    if (!cleantext) { return; }
+    if (police.frisk(getAddress(this), cleantext.length/83/4)) {
       send({ cmd: 'warn', text: 'You are sending too much text. Wait a moment and try again.\nPress the up arrow key to restore your last message.' }, this);
       return;
     }
-
-    const data = { cmd: 'chat', nick: this.nick, text };
+    const data = { cmd: 'chat', nick: this.nick, text: cleantext };
     if (isAdmin(this)) {
       data.admin = true;
     } else if (isMod(this)) {
       data.mod = true;
     }
-    if (this.trip) {
-      data.trip = this.trip;
-    }
+    if (this.trip) data.trip = this.trip;
     broadcast(data, this.channel);
   },
 
-  invite(args) {
-    const nick = String(args.nick);
-    if (!this.channel) {
-      return;
-    }
-
-    if (POLICE.frisk(getAddress(this), 2)) {
+  invite({ nick }) {
+    if (!this.channel) return;
+    if (police.frisk(getAddress(this), 2)) {
       send({ cmd: 'warn', text: 'You are sending invites too fast. Wait a moment before trying again.' }, this);
       return;
     }
-
-    const friend = server.clients.find(client =>
+    const friend = wss.clients.find(client =>
       client.channel === this.channel && client.nick === nick
     );
     if (!friend) {
       send({ cmd: 'warn', text: 'Could not find user in channel' }, this);
       return;
     }
-    if (friend === this) {
-      // Ignore silently
-      return;
-    }
+    if (friend === this) return;
     const channel = Math.random().toString(36).substr(2, 8);
     send({ cmd: 'info', text: `You invited ${friend.nick} to ?${channel}` }, this);
     send({ cmd: 'info', text: `${this.nick} invited you to ?${channel}` }, friend);
   },
 
-  stats(args) {  // eslint-disable-line no-unused-vars
-    const ips = {};
-    const channels = {};
-    server.clints.filter(client => client.channel).forEach((client) => {
-      channels[client.channel] = true;
-      ips[getAddress(client)] = true;
+  stats() {
+    const ips = new Set();
+    const channels = new Set();
+    wss.clients.forEach((client) => {
+      if (!client.channel) return;
+      channels.add(client.channel);
+      ips.add(getAddress(client));
     });
-    send({ cmd: 'info', text: `${Object.keys(ips).length} unique IPs in ${Object.keys(channels).length} channels` }, this);
+    send({ cmd: 'info', text: `${ips.size} unique IPs in ${channels.size} channels` }, this);
   },
 
   // Moderator-only commands below this point
 
-  ban(args) {
-    if (!isMod(this)) {
-      return;
-    }
-
-    const nick = String(args.nick);
-    if (!this.channel) {
-      return;
-    }
-
-    const badClient = server.clients.filter(
+  ban({ nick }) {
+    if (!isMod(this)) return;
+    if (!this.channel) return;
+    const badClient = wss.clients.find(
       client => client.channel === this.channel && client.nick === nick,
       this
-    )[0];
-
+    );
     if (!badClient) {
       send({ cmd: 'warn', text: `Could not find ${nick}` }, this);
       return;
     }
-
     if (isMod(badClient)) {
       send({ cmd: 'warn', text: 'Cannot ban moderator' }, this);
       return;
     }
-
-    POLICE.arrest(getAddress(badClient));
+    police.arrest(getAddress(badClient));
     console.log(`${this.nick} [${this.trip}] banned ${nick} in ${this.channel}`);
     broadcast({ cmd: 'info', text: `Banned ${nick}` }, this.channel);
   },
 
-  unban(args) {
-    if (!isMod(this)) {
-      return;
-    }
-
-    const ip = String(args.ip);
-    if (!this.channel) {
-      return;
-    }
-
-    POLICE.pardon(ip);
+  unban({ ip }) {
+    if (!isMod(this)) return;
+    if (!this.channel) return;
+    police.pardon(ip);
     console.log(`${this.nick} [${this.trip}] unbanned ${ip} in ${this.channel}`);
     send({ cmd: 'info', text: `Unbanned ${ip}` }, this);
   },
@@ -333,68 +219,43 @@ const COMMANDS = {
   // Admin-only commands below this point
 
   listUsers() {
-    if (!isAdmin(this)) {
-      return;
-    }
-    const channels = {};
-    server.clients.filter(client => client.channel).forEach((client) => {
-      if (!channels[client.channel]) {
-        channels[client.channel] = [];
-      }
-      channels[client.channel].push(client.nick);
+    if (!isAdmin(this)) return;
+    const channels = new Map();
+    wss.clients.forEach((client) => {
+      if (!client.channel) return;
+      if (!channels.has(client.channel)) channels.set(client.channel, []);
+      channels.get(client.channel).push(client.nick);
     });
-
-    const lines = [];
-    Object.keys(channels).forEach((channel) => {
-      lines.push(`?${channel} ${channels[channel].join(', ')}`);
-    });
-    let text = `${server.clients.length} users online:\n\n`;
-    text += lines.join('\n');
-    send({ cmd: 'info', text }, this);
+    const lines = Array.from(channels).map(([channel, users]) => `?${channel} ${users.join(', ')}`);
+    send({ cmd: 'info', text: `${wss.clients.length} users online:\n\n${lines.join('\n')}` }, this);
   },
 
-  broadcast(args) {
-    if (!isAdmin(this)) {
-      return;
-    }
-    const text = String(args.text);
+  broadcast({ text }) {
+    if (!isAdmin(this)) return;
     broadcast({ cmd: 'info', text: `Server broadcast: ${text}` });
   },
 };
 
-server.on('connection', (socket) => {
-  socket.on('message', (data) => {
+wss.on('connection', (ws) => {
+  ws.on('message', (data) => {
     try {
-      // Don't penalize yet, but check whether IP is rate-limited
-      if (POLICE.frisk(getAddress(socket), 0)) {
-        send({ cmd: 'warn', text: 'Your IP is being rate-limited or blocked.' }, socket);
+      if (police.frisk(getAddress(ws), 0)) {
+        send({ cmd: 'warn', text: 'Your IP is being rate-limited or blocked.' }, ws);
         return;
       }
-      // Penalize here, but don't do anything about it
-      POLICE.frisk(getAddress(socket), 1);
-
-      // ignore ridiculously large packets
-      if (data.length > 65536) {
-        return;
-      }
+      police.frisk(getAddress(ws), 1);
+      if (data.length > 65536) return;
       const args = JSON.parse(data);
-      const cmd = args.cmd;
-      const command = COMMANDS[cmd];
-      if (command && args) {
-        command.call(socket, args);
+      if (Client.hasOwnProperty(args.cmd)) {
+        Client[args.cmd].call(ws, args);
       }
-    } catch (e) {
-      console.warn(e.stack);
+    } catch (err) {
+      console.warn(err.stack);
     }
   });
-
-  socket.on('close', () => {
-    try {
-      if (socket.channel) {
-        broadcast({ cmd: 'onlineRemove', nick: socket.nick }, socket.channel);
-      }
-    } catch (e) {
-      console.warn(e.stack);
+  ws.on('close', () => {
+    if (ws.channel) {
+      broadcast({ cmd: 'onlineRemove', nick: ws.nick }, ws.channel);
     }
   });
 });
