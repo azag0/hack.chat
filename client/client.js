@@ -232,8 +232,7 @@ function userAdd(nick) {
 
 function userRemove(nick) {
   const users = $('#users');
-  const children = users.children;
-  children.forEach((user) => {
+  Array.from(users.children).forEach((user) => {
     if (user.textContent === nick) {
       users.removeChild(user);
     }
