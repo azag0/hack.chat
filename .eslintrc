@@ -2,9 +2,6 @@
     "parserOptions": {
         "ecmaVersion": 2016
     },
-    "env": {
-        "node": true
-    },
     "extends": [
         "airbnb"
     ],

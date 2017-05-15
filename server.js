@@ -1,3 +1,5 @@
+/* eslint-env node */
+
 const fs = require('fs');
 const WebSocket = require('ws');
 const crypto = require('crypto');
