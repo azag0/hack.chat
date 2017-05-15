@@ -9,6 +9,7 @@
         "no-console": 0,
         "no-mixed-operators": 0,
         "space-infix-ops": 0,
+        "no-alert": 0,
         "no-prototype-builtins": 0,
         "comma-dangle": ["error", {
             "arrays": "always-multiline",
