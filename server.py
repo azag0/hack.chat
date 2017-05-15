@@ -59,11 +59,6 @@ class Client:
         rooms[channel].add(self)
         self.nick = nick
         self.channel = channel
-        await broadcast({'cmd': 'onlineAdd', 'nick': nick}, channel)
-        await self.send({
-            'cmd': 'onlineSet',
-            'nicks': [cl.nick for cl in rooms[channel]]
-        })
         for ttime, nick, text in get_messages(channel):
             await self.send({
                 'cmd': 'chat',
@@ -71,6 +66,11 @@ class Client:
                 'nick': nick,
                 'text': text
             })
+        await broadcast({'cmd': 'onlineAdd', 'nick': nick}, channel)
+        await self.send({
+            'cmd': 'onlineSet',
+            'nicks': [cl.nick for cl in rooms[channel]]
+        })
 
     async def chat(self, text, **kwargs):
         if not self.channel:
