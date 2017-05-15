@@ -1,6 +1,6 @@
 {
-  "admin": "AzureDiamond",
-  "password": "hunter2",
+  "admin": "admin",
+  "password": "admin",
   "mods": [
   	"add-mod-tripcodes-here"
   ],
