@@ -117,7 +117,14 @@ function updateTitle() {
   document.title = title;
 }
 
+let latestMsg = 0;
+
 function pushMessage(args) {
+  if (args.time <= latestMsg) {
+    return;
+  }
+  if (args.time) latestMsg = args.time;
+
  // Message container
   const messageEl = document.createElement('div');
   messageEl.classList.add('message');

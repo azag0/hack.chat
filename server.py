@@ -5,15 +5,23 @@ import sqlite3
 import websockets
 import asyncio
 import uvloop
+import time
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 with open('config.json') as f:
     cfg = json.load(f)
 
 db = sqlite3.connect('messages.db', check_same_thread=False)
-db.execute('create table if not exists msgs (channel text, nick text, msg text)')
+db.execute(
+    'create table if not exists msgs '
+    '(time integer primary key, channel text, nick text, msg text)'
+)
 
 rooms = defaultdict(set)
+
+
+def get_now():
+    return int(1000*time.time())
 
 
 async def broadcast(obj, channel):
@@ -23,12 +31,12 @@ async def broadcast(obj, channel):
 
 def get_messages(channel):
     yield from db.execute(
-        f'select nick, msg from msgs where channel = "{channel}" order by oid'
+        f'select time, nick, msg from msgs where channel = "{channel}" order by time'
     )
 
 
-def log_message(channel, nick, text):
-    db.execute('insert into msgs values (?,?,?)', (channel, nick, text))
+def log_message(now, channel, nick, text):
+    db.execute('insert into msgs values (?,?,?,?)', (now, channel, nick, text))
     db.commit()
 
 
@@ -56,18 +64,25 @@ class Client:
             'cmd': 'onlineSet',
             'nicks': [cl.nick for cl in rooms[channel]]
         })
-        for nick, text in get_messages(channel):
-            await self.send({'cmd': 'chat', 'nick': nick, 'text': text})
+        for ttime, nick, text in get_messages(channel):
+            await self.send({
+                'cmd': 'chat',
+                'time': ttime,
+                'nick': nick,
+                'text': text
+            })
 
     async def chat(self, text, **kwargs):
         if not self.channel:
             return
+        now = get_now()
         await broadcast({
             'cmd': 'chat',
+            'time': now,
             'nick': self.nick,
             'text': text
         }, self.channel)
-        log_message(self.channel, self.nick, text)
+        log_message(now, self.channel, self.nick, text)
 
 
 async def handler(ws, path):
