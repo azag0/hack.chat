@@ -1,0 +1,6 @@
+import asyncio
+
+
+class Loop(asyncio.AbstractEventLoop): ...
+
+def new_event_loop() -> Loop: ...

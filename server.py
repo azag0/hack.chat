@@ -5,6 +5,9 @@ import sqlite3
 import websockets
 import time
 
+from typing import DefaultDict, Set, Any, Optional, Iterator, Tuple  # noqa
+WebSocket = websockets.WebSocketServerProtocol
+
 with open('config.json') as f:
     cfg = json.load(f)
 
@@ -16,21 +19,22 @@ db.execute(
 
 
 class Client:
-    def __init__(self, ws):
+    def __init__(self, ws: WebSocket) -> None:
         self.ws = ws
-        self.nick = None
-        self.channel = None
+        self.nick: Optional[str] = None
+        self.channel: Optional[str] = None
 
-    async def send(self, obj):
-        await self.ws.send(json.dumps(obj))
+    async def send(self, obj: Any) -> None:
+        s = json.dumps(obj)
+        await self.ws.send(s)
 
-    async def recv(self):
+    async def recv(self) -> Any:
         data = await self.ws.recv()
         return json.loads(data)
 
     cmds = 'join chat'.split()
 
-    async def join(self, channel, nick, **kwargs):
+    async def join(self, channel: str, nick: str, **kwargs: Any) -> None:
         rooms[channel].add(self)
         self.nick = nick
         self.channel = channel
@@ -47,8 +51,8 @@ class Client:
             'nicks': [cl.nick for cl in rooms[channel]]
         })
 
-    async def chat(self, text, **kwargs):
-        if not self.channel:
+    async def chat(self, text: str, **kwargs: Any) -> None:
+        if not self.channel or not self.nick:
             return
         now = get_now()
         await broadcast({
@@ -60,30 +64,30 @@ class Client:
         log_message(now, self.channel, self.nick, text)
 
 
-rooms = defaultdict(set)
+rooms: DefaultDict[str, Set[Client]] = defaultdict(set)
 
 
-def get_now():
+def get_now() -> int:
     return int(1000*time.time())
 
 
-async def broadcast(obj, channel):
+async def broadcast(obj: Any, channel: str) -> None:
     for client in rooms[channel]:
         await client.send(obj)
 
 
-def get_messages(channel):
+def get_messages(channel: str) -> Iterator[Tuple[int, str, str]]:
     yield from db.execute(
         f'select time, nick, msg from msgs where channel = "{channel}" order by time'
     )
 
 
-def log_message(now, channel, nick, text):
+def log_message(now: int, channel: str, nick: str, text: str) -> None:
     db.execute('insert into msgs values (?,?,?,?)', (now, channel, nick, text))
     db.commit()
 
 
-async def handler(ws, path):
+async def handler(ws: WebSocket, path: str) -> None:
     client = Client(ws)
     try:
         while True:
