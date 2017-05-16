@@ -90,7 +90,7 @@ async def handler(ws, path):
             args = await client.recv()
             if args['cmd'] in client.cmds:
                 await getattr(client, args['cmd'])(**args)
-    except websockets.exceptions.ConnectionClosed as e:
+    except websockets.ConnectionClosed as e:
         if not client.channel:
             return
         rooms[client.channel].remove(client)
