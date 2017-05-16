@@ -3,10 +3,7 @@ import json
 from collections import defaultdict
 import sqlite3
 import websockets
-import asyncio
-import uvloop
 import time
-asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 with open('config.json') as f:
     cfg = json.load(f)
@@ -102,7 +99,12 @@ async def handler(ws, path):
         }, client.channel)
 
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(websockets.serve(handler, cfg['host'], cfg['port']))
-print(f'Started server on {cfg["host"]}:{cfg["port"]}')
-loop.run_forever()
+if __name__ == '__main__':
+    import asyncio
+    import uvloop
+
+    coro = websockets.serve(handler, cfg['host'], cfg['port'])
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    asyncio.ensure_future(coro)
+    loop = asyncio.get_event_loop()
+    loop.run_forever()
