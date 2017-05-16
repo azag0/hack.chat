@@ -14,28 +14,6 @@ db.execute(
     '(time integer primary key, channel text, nick text, msg text)'
 )
 
-rooms = defaultdict(set)
-
-
-def get_now():
-    return int(1000*time.time())
-
-
-async def broadcast(obj, channel):
-    for client in rooms[channel]:
-        await client.send(obj)
-
-
-def get_messages(channel):
-    yield from db.execute(
-        f'select time, nick, msg from msgs where channel = "{channel}" order by time'
-    )
-
-
-def log_message(now, channel, nick, text):
-    db.execute('insert into msgs values (?,?,?,?)', (now, channel, nick, text))
-    db.commit()
-
 
 class Client:
     def __init__(self, ws):
@@ -80,6 +58,29 @@ class Client:
             'text': text
         }, self.channel)
         log_message(now, self.channel, self.nick, text)
+
+
+rooms = defaultdict(set)
+
+
+def get_now():
+    return int(1000*time.time())
+
+
+async def broadcast(obj, channel):
+    for client in rooms[channel]:
+        await client.send(obj)
+
+
+def get_messages(channel):
+    yield from db.execute(
+        f'select time, nick, msg from msgs where channel = "{channel}" order by time'
+    )
+
+
+def log_message(now, channel, nick, text):
+    db.execute('insert into msgs values (?,?,?,?)', (now, channel, nick, text))
+    db.commit()
 
 
 async def handler(ws, path):
