@@ -100,11 +100,9 @@ async def handler(ws, path):
 
 
 if __name__ == '__main__':
-    import asyncio
     import uvloop
 
     coro = websockets.serve(handler, cfg['host'], cfg['port'])
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    asyncio.ensure_future(coro)
-    loop = asyncio.get_event_loop()
+    loop = uvloop.new_event_loop()
+    loop.create_task(coro)
     loop.run_forever()
