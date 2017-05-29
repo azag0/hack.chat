@@ -7,12 +7,10 @@ from collections import defaultdict
 import sqlite3
 import websockets
 import time
+import sys
 
 from typing import DefaultDict, Set, Any, Optional, Iterator, Tuple  # noqa
 WebSocket = websockets.WebSocketServerProtocol
-
-with open('config.json') as f:
-    cfg = json.load(f)
 
 db = sqlite3.connect('messages.db', check_same_thread=False)
 db.execute(
@@ -110,7 +108,7 @@ async def handler(ws: WebSocket, path: str) -> None:
 if __name__ == '__main__':
     import uvloop
 
-    coro = websockets.serve(handler, cfg['host'], cfg['port'])
+    coro = websockets.serve(handler, sys.argv[1], sys.argv[2])
     loop = uvloop.new_event_loop()
     loop.create_task(coro)
     loop.run_forever()
