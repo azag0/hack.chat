@@ -1,15 +1,5 @@
-## Local install
+# Python hack.chat
 
-### Server
+This is a fork of Andrew Belt's [hack.chat](https://github.com/AndrewBelt/hack.chat) with the server part rewritten in Python 3.
 
-* `git clone https://github.com/azag0/hack.chat.git`
-* `cd hack.chat`
-* `npm install`
-* Copy `config-sample.json` to `config.json` and edit if needed.
-* `npm start`
-
-### Client
-* `cd client`
-* `npm install -g less http-server`
-* `make`
-* `http-server`
+The client part is included almost as is from the original project, made conforming to the Airbnb JS style.

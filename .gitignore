@@ -1,4 +1,5 @@
-/node_modules/
-/config.json
 /venv
 /messages.db
+/.mypy_cache/
+*.egg-info
+*.pyc
